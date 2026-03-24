@@ -113,7 +113,7 @@ export const useTeamStore = create<TeamState>((set, get) => ({
       .select()
       .single();
 
-    if (error) { console.error('[team] create failed:', error); return null; }
+    if (error) { console.error('[team] create failed:', error.message, error.code, error.details, error.hint); return null; }
 
     // Auto-add creator as team_admin
     if (team) {

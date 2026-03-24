@@ -6,6 +6,34 @@
 -- user_id is kept on records for audit trail only.
 -- Pool Fund model: fees + sponsorships - expenses = balance
 
+-- ── Profiles table (required before cricket tables) ──────────
+CREATE TABLE IF NOT EXISTS profiles (
+  id         UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email      TEXT,
+  full_name  TEXT DEFAULT '',
+  is_admin   BOOLEAN DEFAULT false,
+  disabled   BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+DROP POLICY IF EXISTS "Service role can manage profiles" ON profiles;
+CREATE POLICY "Users can read own profile" ON profiles FOR SELECT USING (id = auth.uid());
+CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (id = auth.uid());
+CREATE POLICY "Service role can manage profiles" ON profiles FOR ALL USING (true);
+
+-- ── Utility: auto-update updated_at timestamp ────────────────
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ── Helper functions ───────────────────────────────────────
 CREATE OR REPLACE FUNCTION has_cricket_access()
 RETURNS BOOLEAN AS $$
@@ -47,11 +75,16 @@ CREATE TABLE IF NOT EXISTS cricket_players (
 
 ALTER TABLE cricket_players ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read players" ON cricket_players;
 CREATE POLICY "Cricket users can read players" ON cricket_players FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage players" ON cricket_players;
 CREATE POLICY "Admin can manage players" ON cricket_players FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can update players" ON cricket_players;
 CREATE POLICY "Admin can update players" ON cricket_players FOR UPDATE USING (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete players" ON cricket_players;
 CREATE POLICY "Admin can delete players" ON cricket_players FOR DELETE USING (is_cricket_admin());
 
+DROP TRIGGER IF EXISTS set_cricket_players_updated_at ON cricket_players;
 CREATE TRIGGER set_cricket_players_updated_at BEFORE UPDATE ON cricket_players
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
@@ -71,11 +104,16 @@ CREATE TABLE IF NOT EXISTS cricket_seasons (
 
 ALTER TABLE cricket_seasons ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read seasons" ON cricket_seasons;
 CREATE POLICY "Cricket users can read seasons" ON cricket_seasons FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage seasons" ON cricket_seasons;
 CREATE POLICY "Admin can manage seasons" ON cricket_seasons FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can update seasons" ON cricket_seasons;
 CREATE POLICY "Admin can update seasons" ON cricket_seasons FOR UPDATE USING (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete seasons" ON cricket_seasons;
 CREATE POLICY "Admin can delete seasons" ON cricket_seasons FOR DELETE USING (is_cricket_admin());
 
+DROP TRIGGER IF EXISTS set_cricket_seasons_updated_at ON cricket_seasons;
 CREATE TRIGGER set_cricket_seasons_updated_at BEFORE UPDATE ON cricket_seasons
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
@@ -99,13 +137,56 @@ CREATE TABLE IF NOT EXISTS cricket_expenses (
 
 ALTER TABLE cricket_expenses ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read expenses" ON cricket_expenses;
 CREATE POLICY "Cricket users can read expenses" ON cricket_expenses FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage expenses" ON cricket_expenses;
 CREATE POLICY "Admin can manage expenses" ON cricket_expenses FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can update expenses" ON cricket_expenses;
 CREATE POLICY "Admin can update expenses" ON cricket_expenses FOR UPDATE USING (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete expenses" ON cricket_expenses;
 CREATE POLICY "Admin can delete expenses" ON cricket_expenses FOR DELETE USING (is_cricket_admin());
 
+DROP TRIGGER IF EXISTS set_cricket_expenses_updated_at ON cricket_expenses;
 CREATE TRIGGER set_cricket_expenses_updated_at BEFORE UPDATE ON cricket_expenses
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ── Expense Splits (equal split tracking) ─────────────────────
+CREATE TABLE IF NOT EXISTS cricket_expense_splits (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  expense_id   UUID NOT NULL REFERENCES cricket_expenses(id) ON DELETE CASCADE,
+  player_id    UUID NOT NULL REFERENCES cricket_players(id) ON DELETE CASCADE,
+  share_amount NUMERIC(10,2) NOT NULL
+);
+
+ALTER TABLE cricket_expense_splits ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Cricket users can read splits" ON cricket_expense_splits;
+CREATE POLICY "Cricket users can read splits" ON cricket_expense_splits FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage splits" ON cricket_expense_splits;
+CREATE POLICY "Admin can manage splits" ON cricket_expense_splits FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete splits" ON cricket_expense_splits;
+CREATE POLICY "Admin can delete splits" ON cricket_expense_splits FOR DELETE USING (is_cricket_admin());
+
+-- ── Settlements (player-to-player payments) ───────────────────
+CREATE TABLE IF NOT EXISTS cricket_settlements (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  season_id    UUID NOT NULL REFERENCES cricket_seasons(id) ON DELETE CASCADE,
+  from_player  UUID NOT NULL REFERENCES cricket_players(id) ON DELETE CASCADE,
+  to_player    UUID NOT NULL REFERENCES cricket_players(id) ON DELETE CASCADE,
+  amount       NUMERIC(10,2) NOT NULL,
+  settled_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at   TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE cricket_settlements ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Cricket users can read settlements" ON cricket_settlements;
+CREATE POLICY "Cricket users can read settlements" ON cricket_settlements FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage settlements" ON cricket_settlements;
+CREATE POLICY "Admin can manage settlements" ON cricket_settlements FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete settlements" ON cricket_settlements;
+CREATE POLICY "Admin can delete settlements" ON cricket_settlements FOR DELETE USING (is_cricket_admin());
 
 -- ── Season Fees (per-player fee tracking) ───────────────────
 CREATE TABLE IF NOT EXISTS cricket_season_fees (
@@ -121,9 +202,13 @@ CREATE TABLE IF NOT EXISTS cricket_season_fees (
 
 ALTER TABLE cricket_season_fees ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read fees" ON cricket_season_fees;
 CREATE POLICY "Cricket users can read fees" ON cricket_season_fees FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage fees" ON cricket_season_fees;
 CREATE POLICY "Admin can manage fees" ON cricket_season_fees FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can update fees" ON cricket_season_fees;
 CREATE POLICY "Admin can update fees" ON cricket_season_fees FOR UPDATE USING (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete fees" ON cricket_season_fees;
 CREATE POLICY "Admin can delete fees" ON cricket_season_fees FOR DELETE USING (is_cricket_admin());
 
 -- ── Sponsorships (income to pool fund) ──────────────────────
@@ -144,9 +229,13 @@ CREATE TABLE IF NOT EXISTS cricket_sponsorships (
 
 ALTER TABLE cricket_sponsorships ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read sponsorships" ON cricket_sponsorships;
 CREATE POLICY "Cricket users can read sponsorships" ON cricket_sponsorships FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Admin can manage sponsorships" ON cricket_sponsorships;
 CREATE POLICY "Admin can manage sponsorships" ON cricket_sponsorships FOR INSERT WITH CHECK (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can update sponsorships" ON cricket_sponsorships;
 CREATE POLICY "Admin can update sponsorships" ON cricket_sponsorships FOR UPDATE USING (is_cricket_admin());
+DROP POLICY IF EXISTS "Admin can delete sponsorships" ON cricket_sponsorships;
 CREATE POLICY "Admin can delete sponsorships" ON cricket_sponsorships FOR DELETE USING (is_cricket_admin());
 
 -- ── Profiles: Role-based access columns ─────────────────────
@@ -453,8 +542,11 @@ CREATE TABLE IF NOT EXISTS cricket_gallery (
 
 ALTER TABLE cricket_gallery ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read gallery" ON cricket_gallery;
 CREATE POLICY "Cricket users can read gallery" ON cricket_gallery FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Cricket users can create posts" ON cricket_gallery;
 CREATE POLICY "Cricket users can create posts" ON cricket_gallery FOR INSERT WITH CHECK (has_cricket_access());
+DROP POLICY IF EXISTS "Own or admin can soft-delete posts" ON cricket_gallery;
 CREATE POLICY "Own or admin can soft-delete posts" ON cricket_gallery FOR UPDATE USING (has_cricket_access() AND (user_id = auth.uid() OR is_cricket_admin()));
 
 -- Player tags on gallery posts
@@ -467,7 +559,9 @@ CREATE TABLE IF NOT EXISTS cricket_gallery_tags (
 
 ALTER TABLE cricket_gallery_tags ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read tags" ON cricket_gallery_tags;
 CREATE POLICY "Cricket users can read tags" ON cricket_gallery_tags FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Cricket users can create tags" ON cricket_gallery_tags;
 CREATE POLICY "Cricket users can create tags" ON cricket_gallery_tags FOR INSERT WITH CHECK (has_cricket_access());
 
 -- Comments on gallery posts
@@ -482,9 +576,13 @@ CREATE TABLE IF NOT EXISTS cricket_gallery_comments (
 
 ALTER TABLE cricket_gallery_comments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read comments" ON cricket_gallery_comments;
 CREATE POLICY "Cricket users can read comments" ON cricket_gallery_comments FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Cricket users can create comments" ON cricket_gallery_comments;
 CREATE POLICY "Cricket users can create comments" ON cricket_gallery_comments FOR INSERT WITH CHECK (has_cricket_access());
+DROP POLICY IF EXISTS "Own user can update comments" ON cricket_gallery_comments;
 CREATE POLICY "Own user can update comments" ON cricket_gallery_comments FOR UPDATE USING (has_cricket_access() AND user_id = auth.uid());
+DROP POLICY IF EXISTS "Own or admin can delete comments" ON cricket_gallery_comments;
 CREATE POLICY "Own or admin can delete comments" ON cricket_gallery_comments FOR DELETE USING (has_cricket_access() AND (user_id = auth.uid() OR is_cricket_admin()));
 
 -- Likes on gallery posts
@@ -498,8 +596,11 @@ CREATE TABLE IF NOT EXISTS cricket_gallery_likes (
 
 ALTER TABLE cricket_gallery_likes ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read likes" ON cricket_gallery_likes;
 CREATE POLICY "Cricket users can read likes" ON cricket_gallery_likes FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Cricket users can create likes" ON cricket_gallery_likes;
 CREATE POLICY "Cricket users can create likes" ON cricket_gallery_likes FOR INSERT WITH CHECK (has_cricket_access());
+DROP POLICY IF EXISTS "Users can remove own likes" ON cricket_gallery_likes;
 CREATE POLICY "Users can remove own likes" ON cricket_gallery_likes FOR DELETE USING (has_cricket_access() AND user_id = auth.uid());
 
 -- Emoji reactions on comments
@@ -513,8 +614,11 @@ CREATE TABLE IF NOT EXISTS cricket_comment_reactions (
 
 ALTER TABLE cricket_comment_reactions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Cricket users can read reactions" ON cricket_comment_reactions;
 CREATE POLICY "Cricket users can read reactions" ON cricket_comment_reactions FOR SELECT USING (has_cricket_access());
+DROP POLICY IF EXISTS "Cricket users can add reactions" ON cricket_comment_reactions;
 CREATE POLICY "Cricket users can add reactions" ON cricket_comment_reactions FOR INSERT WITH CHECK (has_cricket_access());
+DROP POLICY IF EXISTS "Users can remove own reactions" ON cricket_comment_reactions;
 CREATE POLICY "Users can remove own reactions" ON cricket_comment_reactions FOR DELETE USING (has_cricket_access() AND user_id = auth.uid());
 
 -- Notifications for gallery activity (tags, comments, likes)
@@ -530,9 +634,13 @@ CREATE TABLE IF NOT EXISTS cricket_notifications (
 
 ALTER TABLE cricket_notifications ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can read own notifications" ON cricket_notifications;
 CREATE POLICY "Users can read own notifications" ON cricket_notifications FOR SELECT USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Cricket users can create notifications" ON cricket_notifications;
 CREATE POLICY "Cricket users can create notifications" ON cricket_notifications FOR INSERT WITH CHECK (has_cricket_access());
+DROP POLICY IF EXISTS "Users can update own notifications" ON cricket_notifications;
 CREATE POLICY "Users can update own notifications" ON cricket_notifications FOR UPDATE USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Users can delete own notifications" ON cricket_notifications;
 CREATE POLICY "Users can delete own notifications" ON cricket_notifications FOR DELETE USING (user_id = auth.uid());
 
 -- ── Storage: gallery-photos bucket ──────────────────────────────
@@ -540,14 +648,17 @@ CREATE POLICY "Users can delete own notifications" ON cricket_notifications FOR 
 -- Path pattern: {season_id}/{post_id}.jpg
 -- Any cricket user can upload (team-shared, not restricted by user_id path)
 
+DROP POLICY IF EXISTS "Cricket users can view gallery photos" ON storage.objects;
 CREATE POLICY "Cricket users can view gallery photos"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'gallery-photos' AND has_cricket_access());
 
+DROP POLICY IF EXISTS "Cricket users can upload gallery photos" ON storage.objects;
 CREATE POLICY "Cricket users can upload gallery photos"
 ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'gallery-photos' AND has_cricket_access());
 
+DROP POLICY IF EXISTS "Cricket users can delete gallery photos" ON storage.objects;
 CREATE POLICY "Cricket users can delete gallery photos"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'gallery-photos' AND has_cricket_access());
@@ -559,18 +670,22 @@ USING (bucket_id = 'gallery-photos' AND has_cricket_access());
 -- Bucket: player-photos (public, 2MB limit, image/jpeg + image/png + image/webp)
 -- Path pattern: {user_id}/{player_id}.jpg
 
+DROP POLICY IF EXISTS "Cricket users can view photos" ON storage.objects;
 CREATE POLICY "Cricket users can view photos"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'player-photos' AND has_cricket_access());
 
+DROP POLICY IF EXISTS "Players can upload own photo" ON storage.objects;
 CREATE POLICY "Players can upload own photo"
 ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'player-photos' AND has_cricket_access() AND (storage.foldername(name))[1] = auth.uid()::text);
 
+DROP POLICY IF EXISTS "Players can update own photo" ON storage.objects;
 CREATE POLICY "Players can update own photo"
 ON storage.objects FOR UPDATE
 USING (bucket_id = 'player-photos' AND has_cricket_access() AND (storage.foldername(name))[1] = auth.uid()::text);
 
+DROP POLICY IF EXISTS "Players can delete own photo" ON storage.objects;
 CREATE POLICY "Players can delete own photo"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'player-photos' AND has_cricket_access() AND (storage.foldername(name))[1] = auth.uid()::text);

@@ -156,7 +156,12 @@ function AdminPanel() {
               </div>
               <div className="mt-3 flex items-center gap-3">
                 <label className="text-[12px] font-medium text-[var(--muted)]">Color</label>
-                <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-8 w-10 cursor-pointer rounded border-0" />
+                <div className="flex items-center gap-1.5">
+                  <div className="h-8 w-8 rounded-lg border border-[var(--border)]" style={{ background: newColor }} />
+                  <input type="text" value={newColor} onChange={(e) => setNewColor(e.target.value)}
+                    className="w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 text-[13px] font-mono text-[var(--text)] outline-none focus:border-[var(--orange)] transition-all"
+                    placeholder="#FBBF24" maxLength={7} />
+                </div>
                 <div className="flex-1" />
                 <button onClick={() => setShowCreate(false)} className="px-4 py-2 text-[13px] text-[var(--muted)] cursor-pointer hover:text-[var(--text)]">Cancel</button>
                 <button onClick={handleCreate} disabled={creating || !newName.trim() || !newSlug.trim()}
