@@ -1,0 +1,13 @@
+# Cloudflare Pages configuration for cricket-hub
+# Deploy: `npx wrangler pages deploy out/`
+# Or connect GitHub repo for auto-deploys from main branch.
+
+name = "cricket-hub"
+compatibility_date = "2024-01-01"
+
+[site]
+bucket = "./out"
+
+# Environment variables are set in Cloudflare Pages dashboard:
+#   NEXT_PUBLIC_SUPABASE_URL
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY
